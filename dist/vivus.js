@@ -1,13 +1,13 @@
 /**
  * vivus - JavaScript library to make drawing animation on SVG
- * @version v0.1.2
+ * @version v0.2.0
  * @link https://github.com/maxwellito/vivus
  * @license MIT
  */
 
 'use strict';
 
-(function () {
+(function (window, document) {
 
   'use strict';
 
@@ -40,7 +40,7 @@ function Pathformer(element) {
       throw new Error('Pathformer [constructor]: "element" parameter is not related to an existing ID');
     }
   }
-  if (element.constructor === SVGSVGElement) {
+  if (element.constructor instanceof window.SVGElement || /^svg$/i.test(element.nodeName)) {
     this.el = element;
   } else {
     throw new Error('Pathformer [constructor]: "element" parameter must be a string or a SVGelement');
@@ -129,12 +129,24 @@ Pathformer.prototype.rectToPath = function (element) {
  * @return {object}             Data for a `path` element
  */
 Pathformer.prototype.polylineToPath = function (element) {
+  var i, path;
   var newElement = {};
   var points = element.points.split(' ');
-  var path = 'M' + points[0];
-  for(var i = 1; i < points.length; i++) {
+  
+  // Reformatting if points are defined without commas
+  if (element.points.indexOf(',') === -1) {
+    var formattedPoints = [];
+    for (i = 0; i < points.length; i+=2) {
+      formattedPoints.push(points[i] + ',' + points[i+1]);
+    }
+    points = formattedPoints;
+  }
+
+  // Generate the path.d value
+  path = 'M' + points[0];
+  for(i = 1; i < points.length; i++) {
     if (points[i].indexOf(',') !== -1) {
-      path += 'L'+points[i];
+      path += 'L' + points[i];
     }
   }
   newElement.d = path;
@@ -145,7 +157,7 @@ Pathformer.prototype.polylineToPath = function (element) {
  * Read `polygon` element to extract and transform
  * data, to make it ready for a `path` object.
  * This method rely on polylineToPath, because the
- * logic is similar. THe path created is just closed,
+ * logic is similar. The path created is just closed,
  * so it needs an 'Z' at the end.
  *
  * @param  {DOMelement} element Polygon element to transform
@@ -260,6 +272,11 @@ var requestAnimFrame, cancelAnimFrame, parsePositiveInt;
  *   duration: <int> (in frames)
  *   start: 'inViewport'|'manual'|'autostart' (start automatically the animation, default: inViewport)
  *   delay: <int> (delay between the drawing of first and last path)
+ *   dashGap <integer> whitespace extra margin between dashes
+ *   pathTimingFunction <function> timing animation function for each path element of the SVG
+ *   animTimingFunction <function> timing animation function for the complete SVG
+ *   forceRender <boolean> force the browser to re-render all updated path items
+ *   selfDestroy <boolean> removes all extra styling on the SVG, and leaves it as original
  *
  * The attribute 'type' is by default on 'delayed'.
  *  - 'delayed'
@@ -288,20 +305,35 @@ var requestAnimFrame, cancelAnimFrame, parsePositiveInt;
 function Vivus (element, options, callback) {
 
   // Setup
-  this.setElement(element);
+  this.isReady = false;
+  this.setElement(element, options);
   this.setOptions(options);
   this.setCallback(callback);
 
-  // Set object variables
-  this.frameLength = 0;
-  this.currentFrame = 0;
-  this.map = [];
-
-  // Start
-  new Pathformer(element);
-  this.mapping();
-  this.starter();
+  if (this.isReady) {
+    this.init();
+  }
 }
+
+/**
+ * Timing functions
+ ************************************** 
+ * 
+ * Default functions to help developers.
+ * It always take a number as parameter (between 0 to 1) then
+ * return a number (between 0 and 1)
+ */
+Vivus.LINEAR          = function (x) {return x;};
+Vivus.EASE            = function (x) {return -Math.cos(x * Math.PI) / 2 + 0.5;};
+Vivus.EASE_OUT        = function (x) {return 1 - Math.pow(1-x, 3);};
+Vivus.EASE_IN         = function (x) {return Math.pow(x, 3);};
+Vivus.EASE_OUT_BOUNCE = function (x) {
+  var base = -Math.cos(x * (0.5 * Math.PI)) + 1,
+    rate = Math.pow(base,1.5),
+    rateR = Math.pow(1 - x, 2),
+    progress = -Math.abs(Math.cos(rate * (2.5 * Math.PI) )) + 1;
+  return (1- rateR) + (progress * rateR);
+};
 
 
 /**
@@ -316,7 +348,7 @@ function Vivus (element, options, callback) {
  *
  * @param {DOM|String}   element  SVG Dom element or id of it
  */
-Vivus.prototype.setElement = function (element) {
+Vivus.prototype.setElement = function (element, options) {
   // Basic check
   if (typeof element === 'undefined') {
     throw new Error('Vivus [constructor]: "element" parameter is required');
@@ -329,10 +361,47 @@ Vivus.prototype.setElement = function (element) {
       throw new Error('Vivus [constructor]: "element" parameter is not related to an existing ID');
     }
   }
-  if (element.constructor === SVGSVGElement) {
+
+  // Create the object element if the property `file` exists in the options object
+  if (options && options.file) {
+    var objElm = document.createElement('object');
+    objElm.setAttribute('type', 'image/svg+xml');
+    objElm.setAttribute('data', options.file);
+    element.appendChild(objElm);
+    element = objElm;
+  }
+
+  switch (element.constructor) {
+  case window.SVGSVGElement:
+  case window.SVGElement:
     this.el = element;
-  } else {
-    throw new Error('Vivus [constructor]: "element" parameter must be a string or a SVGelement');
+    this.isReady = true;
+    break;
+
+  case window.HTMLObjectElement:
+    // If the Object is already loaded
+    this.el = element.contentDocument.querySelector('svg');
+    if (this.el) {
+      this.isReady = true;
+      return;
+    }
+
+    // If we have to wait for it
+    var self = this;
+    element.addEventListener('load', function () {
+      self.el = element.contentDocument.querySelector('svg');
+      if (!self.el) {
+        throw new Error('Vivus [constructor]: object loaded does not contain any SVG');
+      }
+      else {
+        self.isReady = true;
+        self.init();
+      }
+    });
+    break;
+
+  default:
+    throw new Error('Vivus [constructor]: "element" parameter is not valid (or miss the "file" attribute)');
   }
 };
 
@@ -371,12 +440,16 @@ Vivus.prototype.setOptions = function (options) {
     this.start = options.start || allowedStarts[0];
   }
 
-  this.isIE        = (navigator.userAgent.indexOf('MSIE') !== -1);
+  this.isIE        = (window.navigator.userAgent.indexOf('MSIE') !== -1);
   this.duration    = parsePositiveInt(options.duration, 120);
   this.delay       = parsePositiveInt(options.delay, null);
   this.dashGap     = parsePositiveInt(options.dashGap, 2);
   this.forceRender = options.hasOwnProperty('forceRender') ? !!options.forceRender : this.isIE;
   this.selfDestroy = !!options.selfDestroy;
+  this.onReady     = options.onReady;
+
+  this.animTimingFunction = options.animTimingFunction || Vivus.LINEAR;
+  this.pathTimingFunction = options.pathTimingFunction || Vivus.LINEAR;
 
   if (this.delay >= this.duration) {
     throw new Error('Vivus [constructor]: delay must be shorter than duration');
@@ -520,6 +593,7 @@ Vivus.prototype.drawer = function () {
   if (this.currentFrame <= 0) {
     this.stop();
     this.reset();
+    this.callback(this);
   } else if (this.currentFrame >= this.frameLength) {
     this.stop();
     this.currentFrame = this.frameLength;
@@ -550,11 +624,12 @@ Vivus.prototype.drawer = function () {
  *
  */
 Vivus.prototype.trace = function () {
-  var i, progress, path;
+  var i, progress, path, currentFrame;
+  currentFrame = this.animTimingFunction(this.currentFrame / this.frameLength) * this.frameLength;
   for (i = 0; i < this.map.length; i++) {
     path = this.map[i];
-    progress = (this.currentFrame - path.startAt) / path.duration;
-    progress = Math.max(0, Math.min(1, progress));
+    progress = (currentFrame - path.startAt) / path.duration;
+    progress = this.pathTimingFunction(Math.max(0, Math.min(1, progress)));
     if (path.progress !== progress) {
       path.progress = progress;
       path.el.style.strokeDashoffset = Math.floor(path.length * (1 - progress));
@@ -581,6 +656,31 @@ Vivus.prototype.renderPath = function (index) {
         newPath = pathObj.el.cloneNode(true);
     pathObj.el.parentNode.replaceChild(newPath, pathObj.el);
     pathObj.el = newPath;
+  }
+};
+
+/**
+ * When the SVG object is loaded and ready,
+ * this method will continue the initialisation.
+ *
+ * This this mainly due to the case of passing an
+ * object tag in the constructor. It will wait
+ * the end of the loading to initialise.
+ * 
+ */
+Vivus.prototype.init = function () {
+  // Set object variables
+  this.frameLength = 0;
+  this.currentFrame = 0;
+  this.map = [];
+
+  // Start
+  new Pathformer(this.el);
+  this.mapping();
+  this.starter();
+
+  if (this.onReady) {
+    this.onReady(this);
   }
 };
 
@@ -623,6 +723,21 @@ Vivus.prototype.starter = function () {
  */
 
 /**
+ * Get the current status of the animation between
+ * three different states: 'start', 'progress', 'end'.
+ * @return {string} Instance status
+ */
+Vivus.prototype.getStatus = function () {
+  return this.currentFrame === 0 ? 'start' : this.currentFrame === this.frameLength ? 'end' : 'progress';
+};
+
+
+/**
+ * Controls
+ **************************************
+ */
+
+/**
  * Reset the instance to the initial state : undraw
  * Be careful, it just reset the animation, if you're
  * playing the animation, this won't stop it. But just
@@ -630,7 +745,28 @@ Vivus.prototype.starter = function () {
  *
  */
 Vivus.prototype.reset = function () {
-  this.currentFrame = 0;
+  return this.setFrameProgress(0);
+};
+
+/**
+ * Set the instance to the final state : drawn
+ * Be careful, it just set the animation, if you're
+ * playing the animation on rewind, this won't stop it.
+ * But just make it start from the end.
+ *
+ */
+Vivus.prototype.finish = function () {
+  return this.setFrameProgress(1);
+};
+
+/**
+ * Set the level of progress of the drawing.
+ * 
+ * @param {number} progress Level of progress to set
+ */
+Vivus.prototype.setFrameProgress = function (progress) {
+  progress = Math.min(1, Math.max(0, progress));
+  this.currentFrame = Math.round(this.frameLength * progress);
   this.trace();
   return this;
 };
@@ -821,5 +957,19 @@ parsePositiveInt = function (value, defaultValue) {
 };
 
 
-  window.Vivus = Vivus;
-}());
+  if (typeof define === 'function' && define.amd) {
+    // AMD. Register as an anonymous module.
+    define([], function() {
+      return Vivus;
+    });
+  } else if (typeof exports === 'object') {
+    // Node. Does not work with strict CommonJS, but
+    // only CommonJS-like environments that support module.exports,
+    // like Node.
+    module.exports = Vivus;
+  } else {
+    // Browser globals
+    window.Vivus = Vivus;
+  }
+
+}(window, document));

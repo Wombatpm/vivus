@@ -4,8 +4,15 @@ Demo available on http://maxwellito.github.io/vivus
 
 Vivus is a lightweight JavaScript class (with no dependencies) that allows you to animate SVGs, giving them the appearence of being drawn. There are a variety of different animations available, as well as the option to create a custom script to draw your SVG in whatever way you like.
 
-Available via Bower: `bower install vivus`
-or via jsDelivr CDN: `//cdn.jsdelivr.net/vivus/0.1.2/vivus.min.js`
+Available via:
+
+ - [Bower](http://bower.io/): `bower install vivus`
+ - [NPM](https://www.npmjs.com/package/vivus): `npm install vivus`
+ - [SPM](http://spmjs.io/package/vivus): `spm install vivus`
+ - [jsDelivr CDN](http://www.jsdelivr.com/#!vivus): `//cdn.jsdelivr.net/vivus/0.2.0/vivus.min.js`
+ - [WebJars](http://www.webjars.org/)
+
+Join the conversation on [Gitter](https://gitter.im/maxwellito/vivus)
 
 ## Animations
 
@@ -54,12 +61,16 @@ The code is inspired from other repositories. The drawer is inspired from the ex
 As I said, no dependencies here. All you need to do is include the scripts.
 
 ```js
+// Inline SVG
 new Vivus('my-svg-id', {type: 'delayed', duration: 200}, myCallback);
+
+// Dynamic load
+new Vivus('my-div-id', {type: 'delayed', duration: 200, file: 'link/to/my.svg'}, myCallback);
 ```
 
 The Vivus constructor asks for 3 parameters:
 
-- The ID of the SVG to animate (or the DOM element)
+- ID (or object) of DOM element to interact with.<br/>It can be an inline SVG or a wrapper element to append an object tag from the option `file`
 - Option object (described in the following)
 - Callback to call at the end of the animation (optional)
 
@@ -75,8 +86,16 @@ defines how to trigger the animation
   - `autostart` makes it start right now
 - `delay` (integer)
 time between the drawing of first and last path, in frames (only for delayed animations)
+- `file` (string)
+link to the SVG to animate. If set, Vivus will create an object tag and append it to the DOM element given to the constructor. Be careful, use the `onReady` callback before playing with the Vivus instance.
+- `onReady` (function)
+function called when the instance is ready to play
 - `dashGap` (integer)
 whitespace extra margin between dashes. The default value is `2`. Increase it in case of glitches at the initial state of the animation
+- `pathTimingFunction` (function)
+timing animation function for each path element of the SVG. The function must accept a value between 0 and 1, then return a number between 0 and 1.
+- `animTimingFunction` (function)
+timing animation function for the complete SVG. The function must accept a value between 0 and 1, then return a number between 0 and 1.
 - `forceRender` (boolean)
 force the browser to re-render all updated path items. By default, the value is `true` on IE only. (check the 'troubleshoot' section for more details)
 - `selfDestroy` (boolean) removes all extra styling on the SVG, and leaves it as original
@@ -85,7 +104,10 @@ The Vivus object has 3 control methods:
 
 - `play(speed)` Plays the animation with the speed given in parameter. This value can be negative to go backward, between 0 and 1 to go slowly, or superior to 1 to go fast. By default the value is 1.
 - `stop()` Stops the animation.
-- `reset()` Reinitialises the SVG to the original state: undraw.
+- `reset()` Reinitialises the SVG to the original state: undrawn.
+- `finish()` Set the SVG to the final state: drawn.
+- `setFrameProgress(progress)` Set the progress of the animation. Progress must be a number between 0 et 1.
+- `destroy()` Reset the SVG but make the instance out of order.
 
 These control methods return the object so you can chain the actions.
 
@@ -96,6 +118,23 @@ myVivus
   .reset()
   .play(2)
 ```
+
+## Timing function
+
+To give more freedom, it's possible to override the animation of each path and/or the entire SVG. It works a bit like the CSS animation timing function. But instead of using a cubic-bezier function, it use a simple JavaScript function. It must accept a number as parameter (between 0 to 1), then return a number (also between 0 and 1). It's a hook.
+
+If you don't want to create your own, timing methods are available via the constructor object: `EASE`, `EASE_IN`, `EASE_OUT` and `EASE_OUT_BOUNCE`. Then set it in the option object to enjoy them.
+
+```js
+// Here, the ease animation will be use for the global drawing.
+new Vivus('my-svg-id', {
+    type: 'delayed',
+    duration: 200,
+    animTimingFunction: Vivus.EASE
+}, myCallback);
+```
+
+**WARNING**: `animTimingFunction` is called at every frame of the animation, and `pathTimingFunction` is also called at every frame for each path of your SVG. So be careful about them. Keep it simple, or it can affect the performances.
 
 ## Scenarize
 
@@ -181,7 +220,7 @@ Then you can run Gulp with one of the following tasks:
 
 ### Internet Explorer
 
-Some SVG werent't working at all. The only solution found was to clone and replace each updated path element. Of course this solution requires more resources and a lot of DOM manipulation, but it will give a smooth animation like other browsers. This fallback is only applied on Internet Explorer (all versions), and can be disabled via the option `forceRender`.
+Some SVG weren't working at all. The only solution found was to clone and replace each updated path element. Of course this solution requires more resources and a lot of DOM manipulation, but it will give a smooth animation like other browsers. This fallback is only applied on Internet Explorer (all versions), and can be disabled via the option `forceRender`.
 
 Replacing each updated path by a clone was the only way to force IE to re-render the SVG. On some SVGs this trick is not necessary, but IE can be a bit tricky with this. If you're worried about performances, I would recommend you to check if your SVG works correctly by disabling the `forceRender` option. If it works correctly on IE, then keep it like this.
 
@@ -189,7 +228,7 @@ By default, `forceRender` is `true` on Internet Explorer only.
 
 ### Firefox
 
-For Firefox users, you might encounter some glitches depending on your SVG and browser version. On versions before 36, there is a problem to retrieve path length via `getTotalLength` method. Returning 174321516544 instead of 209 (I'm not exaggerating, this comes from a real case), messing up the entire animation treatment. Unfortunately, there's nothing that this library can do, this is due to Firefox. I hope to find a workaround, but at the moment I can only recommend that you test your animation on previous versions of Firefox.
+For Firefox users, you might encounter some glitches depending on your SVG and browser version. On versions before 36, there is a problem retrieving path length via `getTotalLength` method. Returning 174321516544 instead of 209 (I'm not exaggerating, this comes from a real case), messing up the entire animation treatment. Unfortunately, there's nothing that this library can do, this is due to Firefox. I hope to find a workaround, but at the moment I can only recommend that you test your animation on previous versions of Firefox.
 
 ## Debug
 
